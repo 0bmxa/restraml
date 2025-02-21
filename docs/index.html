@@ -502,20 +502,33 @@
                 .catch(error => console.error('Error fetching inspect data', ver, extra, error));
         }
 
+        
+        // Normalizes a MikroTik version string for easy sorting. Uses a SemVer-style (MAJOR.MINOR.PATCH-BUILD) format
+        // with MAJOR/MINOR/PATCH zero-padded to 2-digits, and BUILD defaulting to 'release' (so '5.0rc1' ends up sorted before '5.0').
+        // e.g.  6.49.13beta2  →  06.49.13-beta2
+        //       7.9           →  07.09.00-release
+        const normalizeVersion = (versionStr) => versionStr.replace(
+            /^(\d+)\.(\d+)(?:\.(\d+))?([^\d\s].+)?$/,
+            (_, major, minor, patch = '', build = 'release') => `${major.padStart(2, 0)}.${minor.padStart(2, 0)}.${patch.padStart(2, 0)}-${build}`
+        );
 
         // "MAIN" - fetch all the version from GitHub, which triggers everything via builddir
         fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`)
             .then(response => response.json())
             .then(data => {
-                data.forEach(file => {
-                    if (file.type === "dir") {
-                        console.debug("Got file from GitHub", file)
-                        file.pagesUrl = `${pagesUrl}/${file.path.replace('docs/', '')}`
-                        if (file.name !== "extra") {
-                            document.dispatchEvent(new CustomEvent("builddir", { detail: file }))
-                        }
-                    }
-                })
+                const versionDirs = data.filter(file => file.type === "dir" && file.name !== 'extra');
+                
+                const sortedDirs = versionDirs.toSorted((dirA, dirB) => {
+                    const versionA = normalizeVersion(dirA.name);
+                    const versionB = normalizeVersion(dirB.name);
+                    return (versionA === versionB) ? 0 : (versionA > versionB) ? 1 : -1;
+                });
+
+                for (const dir of sortedDirs) {
+                    console.debug("Got dir from GitHub", dir)
+                    dir.pagesUrl = `${pagesUrl}/${dir.path.replace('docs/', '')}`
+                    document.dispatchEvent(new CustomEvent("builddir", { detail: dir }))
+                }
             })
             .catch(error => console.error('Error fetching build list from GitHub:', error));
 
